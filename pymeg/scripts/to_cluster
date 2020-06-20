@@ -1,0 +1,148 @@
+#!/usr/bin/env python
+'''
+Run a simple script on one cluster node!
+'''
+import argparse
+import os
+import subprocess
+
+
+def submit(walltime, memory, cwd,
+           script, name, nodes='1:ppn=1', env='none',
+           shellfname='to_cluster.sh'):
+    if env is 'none':
+        command = '''
+        #!/bin/bash
+        # walltime: defines maximum lifetime of a job
+        # nodes/ppn: how many nodes (usually 1)? how many cores?
+
+        #PBS -q batch
+        #PBS -l walltime={walltime}:00:00
+        #PBS -l nodes={nodes}
+        #PBS -l mem={memory}gb
+        #PBS -N {name}
+        
+        cd {cwd}  
+        mkdir -p cluster
+        chmod a+rwx cluster
+        
+        #### set journal & error options
+        #PBS -o {cwd}/cluster/$PBS_JOBID.o
+        #PBS -e {cwd}/cluster/$PBS_JOBID.e
+
+
+        # FILE TO EXECUTE
+        {script} 1> {cwd}/cluster/$PBS_JOBID.out 2> {cwd}/cluster/$PBS_JOBID.err
+        '''.format(**{'walltime': walltime,
+                      'nodes': nodes,
+                      'memory': memory,
+                      'cwd': cwd,
+                      'script': script,
+                      'name': name})
+    else:
+        command = '''
+        #!/bin/bash
+        # walltime: defines maximum lifetime of a job
+        # nodes/ppn: how many nodes (usually 1)? how many cores?
+
+        #PBS -q batch
+        #PBS -l walltime={walltime}:00:00
+        #PBS -l nodes={nodes}
+        #PBS -l mem={memory}gb
+        #PBS -N {name}
+        
+        cd {cwd}  
+        mkdir -p cluster
+        chmod a+rwx cluster
+        
+        #### set journal & error options
+        #PBS -o {cwd}/cluster/$PBS_JOBID.o
+        #PBS -e {cwd}/cluster/$PBS_JOBID.e
+
+
+        # FILE TO EXECUTE
+        source activate {env}
+        {script} 1> {cwd}/cluster/$PBS_JOBID.out 2> {cwd}/cluster/$PBS_JOBID.err
+        '''.format(**{'walltime': walltime,
+                      'nodes': nodes,
+                      'memory': memory,
+                      'cwd': cwd,
+                      'script': script,
+                      'name': name,
+                      'env': env})
+    tmp = file(shellfname, 'w')
+    tmp.write(command)
+    tmp.close()
+    subprocess.call("qsub %s" % shellfname, shell=True)
+
+
+if __name__ == '__main__':
+    # 2. Create workers
+    parser = argparse.ArgumentParser()
+    parser.add_argument("script", help='Which command to run?')
+    parser.add_argument("--memory", help="How many GB ram?",
+                        default=12, type=int)
+    parser.add_argument("--walltime", help="Walltime (h)?",
+                        default=15, type=int)
+    parser.add_argument("--nodes", help="Specifiy a list of nodes or the number of cores in PBS syntax",
+                        default='1:ppn=1', type=str)
+    parser.add_argument("--array", help="Map scripts function to workers?",
+                        default=False, action="store_true")
+    parser.add_argument("--filter", dest='filter',
+                        help="Only run an array job in filter is in job parameters",
+                        default=None)
+    parser.add_argument("--nosubmit", dest='submit',
+                        help="Do not submit to torque", default=True, action="store_false")
+
+    parser.add_argument(
+        "--name", help="Give a name to this job. Defaults to executed command.")
+    parser.add_argument("--redo-older", dest='older',
+                        help="Redo all tasks where results are older than this Ymd date (e.g. 20160825). Only effective for array jobs.",
+                        type=str, default='now')
+    parser.add_argument('-D', action='append', default=[], 
+        help="Extra arguments to be passed to the executing function. E.g. -Dfoo=10 means foo=10")
+    parser.add_argument("--pyenv", default='none',
+                        help="Activate a different conda environment",
+                        type=str, dest='env')
+
+    args = parser.parse_args()
+    extra_args = dict(i.partition('=')[::2] for i in args.D)
+    if args.name is None:
+        args.name = args.script
+    if not args.array:
+        if args.submit:
+            submit(args.walltime, args.memory,
+                   os.getcwd(), args.script, args.name, args.nodes, args.env)
+    else:
+        '''
+        Need to build script to execute.
+        '''
+        import os
+        import sys
+        sys.path.append(os.getcwd())
+        import tempfile
+        pyfile = args.script.replace('.py', '')
+        mod = __import__(pyfile)
+        tmpdir = tempfile.mkdtemp(
+            prefix='cluster_' + args.name, dir=os.getcwd())
+        for i, x in enumerate(mod.list_tasks(**extra_args)):
+            if type(x) == str:
+                x = '"' + x + '"'
+            fname = os.path.join(tmpdir, 'job_%i.py' % i)
+            shellfname = os.path.join(tmpdir, 'job_%i.sh' % i)
+            f = open(fname, 'w')
+            script = """
+import os, sys
+sys.path.append(os.getcwd())
+print 'Parameters:', '%s', '%s'
+import %s
+%s.execute(*%s)
+            """ % (str(x).replace("'", ''), fname, pyfile, pyfile, str(x))
+            command = 'python ' + fname
+            f.write(script)
+            f.close()
+            subprocess.call(['chmod', '-R', 'a+rwx', tmpdir])
+            if args.submit:
+                submit(args.walltime, args.memory,
+                       os.getcwd(), command, args.name, args.nodes,
+                       args.env, shellfname=shellfname)

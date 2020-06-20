@@ -1,0 +1,11 @@
+Notes about data files
+----------------------
+
+Pilot03_Confidence_20151124_01.ds:
+
+The triggers were send withut wait after the offset of the triggers. Triggers 
+in the beginning of a trial were therefore sometimes merged together and are not
+correctly read out by fieldtrip. This concerns all triggers between trial onset
+and ref onset (150 - first occurence of 64).
+
+ 

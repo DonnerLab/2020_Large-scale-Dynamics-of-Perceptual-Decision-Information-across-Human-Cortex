@@ -1,0 +1,588 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Source reconstruction with pymeg &#8212; pymeg 0.1 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="source-reconstruction-with-pymeg">
+<h1>Source reconstruction with pymeg<a class="headerlink" href="#source-reconstruction-with-pymeg" title="Permalink to this headline">¶</a></h1>
+<p>Pymeg provides a host of helper functions to facilitate analysis of MEG
+data. It makes heavy use of python-mne and mainly automates specific tasks
+and provides the glue between separate processing steps. It does not
+actually provide a lot of new functionality.</p>
+<p>This guide focuses exclusively on carrying out source reconstruction using
+an LCMV beamformer. It describes most of the necessary preprocessing steps.</p>
+<p>The core idea of pymeg is that you want to carry out single-trial source
+reconstruction in a set of regions of interest. Anything else will require
+various amounts of extra work not covered here.</p>
+</div>
+<div class="section" id="preparing-a-subject-for-source-reconstruction">
+<h1>Preparing a subject for source reconstruction<a class="headerlink" href="#preparing-a-subject-for-source-reconstruction" title="Permalink to this headline">¶</a></h1>
+<p>Getting a subject ready for source reconstruction requires a few steps that
+can be carried out in parallel:</p>
+<blockquote>
+<div><ul class="simple">
+<li>Preprocessing/epoching</li>
+<li>Surface generation / recon-all</li>
+</ul>
+</div></blockquote>
+<dl class="docutils">
+<dt>After this you can continue by:</dt>
+<dd><ul class="first simple">
+<li>Aligning the HCPMMP atlas to your subject</li>
+<li>Aligning the Wang et al. 2015 atlas</li>
+</ul>
+<p class="last">(or in general any kind of labels that you need)
+- Creating a high density head shape model
+- Creating BEM surfaces with fieldtrip
+- Creating a MRI&lt;&gt;MEG transformation matrix</p>
+</dd>
+</dl>
+<div class="section" id="preprocess-meg-data">
+<h2>Preprocess MEG data<a class="headerlink" href="#preprocess-meg-data" title="Permalink to this headline">¶</a></h2>
+<p>Use MNE/pymeg or fieldtrip to preprocess and epoch your data. Make sure
+that you do not remove head localization channels from your epochs.</p>
+<p>Please save your epochs as MNE fif files. Pymeg contains a fieldtrip-&gt;MNE
+conversion script to load saved fieldtrip structures and save them as
+fif files. Please note that this requires the raw file that generated
+each epoch file - this allows us to extract MNE specific info structures.</p>
+<p>It is also advisable to not change the channel names if you use fieldtrip,
+if you do matching of fieldtrip channels to MNE channel info might become
+difficult.</p>
+<p>The conversion script can be found in pymeg/read_fieldtrip.py</p>
+</div>
+<div class="section" id="surface-generation-recon-all">
+<h2>Surface generation / recon-all<a class="headerlink" href="#surface-generation-recon-all" title="Permalink to this headline">¶</a></h2>
+<p>MNE performs source reconstruction on cortical surfaces. It is easiest
+to create these surfaces by using freesurfers recon-all pipeline.</p>
+<p>If you are &#64;UKE you can use the cluster wide install for this. The first
+step is to set your freesurfer subject folder:</p>
+<blockquote>
+<div>&gt; export SUBJECTS_DIR=/path/to/subjects_dir</div></blockquote>
+<p>This directory will host the output of freesurfer (e.g. all cortical meshes).
+Freesurfer will automatically create a subdirectory for each subject here.</p>
+<p>At this point you should also copy freesurfers fsaverage and fsaverage_sym
+from /opt/progs/freesurfer/subjects to your subject dir. We will later add
+new information for these subjects and linking to /opt/progs makes these
+subjects write protected.</p>
+<p>You will likely have gotten a single T1 MPRAGE image in DICOM format as
+each subjects MRI. This needs to be converted to NIFTI format. You can use
+dcm2niix for this (installed in /home/nwilming/bin/). The correct DICOM
+series will have ‘mprage’ in it’s name once converted to NIFTI.</p>
+<p>Now call recon-all:</p>
+<blockquote>
+<div>&gt; recon-all -subjid SUBID -all -i path/to/nifti_T1</div></blockquote>
+<p>And wait. This will take a few hours. It makes sense to parallelize this call
+over the cluster.</p>
+</div>
+<div class="section" id="aligning-the-hcpmmp-atlas-to-your-subject">
+<h2>Aligning the HCPMMP atlas to your subject<a class="headerlink" href="#aligning-the-hcpmmp-atlas-to-your-subject" title="Permalink to this headline">¶</a></h2>
+<p>The cluster wide freesurfer install is quite old. There is a newer version
+available in /home/nwilming/freesurfer. Setup your bashrc to reflect this
+install.</p>
+<p>To then get the HCPMMP atlas fire up a python &gt;= 3.6 interpreter and import
+pymeg:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">pymeg</span> <span class="k">import</span> <span class="n">atlas_glasser</span> <span class="k">as</span> <span class="n">ag</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ag</span><span class="o">.</span><span class="n">get_hcp</span><span class="p">(</span><span class="s1">&#39;subjects_dir&#39;</span><span class="p">)</span> <span class="c1"># Needs to be done only once</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ag</span><span class="o">.</span><span class="n">get_hcp_annotation</span><span class="p">(</span><span class="n">subjects_dir</span><span class="p">,</span> <span class="n">subject</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Now check if this worked by loading the subjects inflated surface and the
+HCOMMP annotation file in freeview (only works on node031).</p>
+</div>
+<div class="section" id="aligning-the-wang-et-al-2015-atlas">
+<h2>Aligning the Wang et al. 2015 atlas<a class="headerlink" href="#aligning-the-wang-et-al-2015-atlas" title="Permalink to this headline">¶</a></h2>
+<p>This is a bit more involved. I suggest you use docker. Follow the instructions
+here:</p>
+<blockquote>
+<div>…. link missing …</div></blockquote>
+<p>Docker does not work on the cluser! You need to do this on your own laptop.</p>
+</div>
+<div class="section" id="creating-a-high-density-head-shape-model">
+<h2>Creating a high density head shape model<a class="headerlink" href="#creating-a-high-density-head-shape-model" title="Permalink to this headline">¶</a></h2>
+<p>Create a scalp surface from the MRI:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">mne</span> <span class="n">make_scalp_surfaces</span> <span class="o">-</span><span class="n">s</span> <span class="n">SUBID</span> <span class="o">-</span><span class="n">d</span> <span class="n">SUBJECT_DIR</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="creating-bem-surfaces-with-fieldtrip">
+<h2>Creating BEM surfaces with fieldtrip<a class="headerlink" href="#creating-bem-surfaces-with-fieldtrip" title="Permalink to this headline">¶</a></h2>
+<p>MNE has a tool to create bem surfaces from an MRI (mne watershed_bem).
+I found that this did not work particularly well with the mprage
+based images that we get. Using SPM/fieldtrip produced less artifacts.</p>
+<p>To create head meshes with fieldtrip use the scripts in mfiles/</p>
+</div>
+<div class="section" id="creating-a-mri-meg-transformation-matrix">
+<h2>Creating a MRI&lt;&gt;MEG transformation matrix<a class="headerlink" href="#creating-a-mri-meg-transformation-matrix" title="Permalink to this headline">¶</a></h2>
+<p>Use the MNE GUI to create transformation matrices. Pymeg provides a
+little help here… XXX</p>
+<div class="toctree-wrapper compound">
+</div>
+<span class="target" id="module-pymeg.source_reconstruction"></span><dl class="function">
+<dt id="pymeg.source_reconstruction.add_volume_info">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">add_volume_info</code><span class="sig-paren">(</span><em>subject</em>, <em>surface</em>, <em>subjects_dir</em>, <em>volume='T1'</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#add_volume_info"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.add_volume_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add volume info from MGZ volume</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.check_bems">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">check_bems</code><span class="sig-paren">(</span><em>subjects</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#check_bems"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.check_bems" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a plot of all BEM segmentations.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.circumcenter">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">circumcenter</code><span class="sig-paren">(</span><em>coil1</em>, <em>coil2</em>, <em>coil3</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#circumcenter"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.circumcenter" title="Permalink to this definition">¶</a></dt>
+<dd><p>Determines position and orientation of the circumcenter of fiducials.
+Adapted from:
+<a class="reference external" href="http://www.fieldtriptoolbox.org/example/how_to_incorporate_head_movements_in_meg_analysis">http://www.fieldtriptoolbox.org/example/how_to_incorporate_head_movements_in_meg_analysis</a>
+CIRCUMCENTER determines the position and orientation of the circumcenter
+of the three fiducial markers (MEG headposition coils).</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>coil1-3</strong> – 3xN array
+X,y,z-coordinates of the 3 coils [3 X N],[3 X N],[3 X N] where N
+is timesamples/trials.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">X,y,z-coordinates of the circumcenter [1-3 X N], and the orientations
+to the x,y,z-axes [4-6 X N].</td>
+</tr>
+</tbody>
+</table>
+<ol class="upperalpha simple">
+<li>Stolk, 2012</li>
+</ol>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.get_ctf_trans">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">get_ctf_trans</code><span class="sig-paren">(</span><em>filename</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#get_ctf_trans"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.get_ctf_trans" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get transformation matrix between sensors and head space.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.head_movement">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">head_movement</code><span class="sig-paren">(</span><em>epochs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#head_movement"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.head_movement" title="Permalink to this definition">¶</a></dt>
+<dd><p>Compute head movement from epochs.</p>
+<p>Returns the circumcenter of the three fiducials for each time point.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.make_bem_model">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">make_bem_model</code><span class="sig-paren">(</span><em>subject</em>, <em>ico=4</em>, <em>conductivity=(0.3</em>, <em>0.006</em>, <em>0.3)</em>, <em>subjects_dir=None</em>, <em>verbose=None</em>, <em>bem_sub_path='bem'</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#make_bem_model"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.make_bem_model" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a BEM model for a subject.</p>
+<p>Copied from MNE python, adapted to read surface from fieldtrip / spm
+segmentation.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.make_trans">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">make_trans</code><span class="sig-paren">(</span><em>subject</em>, <em>raw_filename</em>, <em>epoch_filename</em>, <em>trans_name</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#make_trans"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.make_trans" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create coregistration between MRI and MEG space.</p>
+<p>Call MNE gui to create a MEG&lt;&gt;MRI transformation matrix</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.replace_fiducials">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">replace_fiducials</code><span class="sig-paren">(</span><em>info</em>, <em>fiducials</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#replace_fiducials"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.replace_fiducials" title="Permalink to this definition">¶</a></dt>
+<dd><p>Replace initial fiducial measuremnt with new estimates</p>
+<p>CTF systems measure fiducial location at the beginning of the measurement.
+When used with online head loc over multiple sessions these measurements
+are not accurate. This is because subjects are guided to the head position
+of previous sessions.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>info</strong> – MNE info structure</li>
+<li><strong>fiducials</strong> – dict
+Dictionary that contains fiducial positions, e.g.
+see output of get_ref_head_pos.</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">Info structure with updated head position.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.source_reconstruction.set_fs_subjects_dir">
+<code class="descclassname">pymeg.source_reconstruction.</code><code class="descname">set_fs_subjects_dir</code><span class="sig-paren">(</span><em>directory</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/source_reconstruction.html#set_fs_subjects_dir"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.source_reconstruction.set_fs_subjects_dir" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set freesurfer subjectdir environment variable</p>
+</dd></dl>
+
+<span class="target" id="module-pymeg.lcmv"></span><dl class="function">
+<dt id="pymeg.lcmv.accumulate">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">accumulate</code><span class="sig-paren">(</span><em>data</em>, <em>time</em>, <em>est_key</em>, <em>est_val</em>, <em>roi</em>, <em>trial</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#accumulate"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.accumulate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Transform source reconstruction results to a DataFrane.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>data</strong> – ndarray
+If ntrials x vertices x time in which case the
+function will average across vertices.
+If ntrials x time will be directly converted to df.</li>
+<li><strong>time</strong> – ndarray
+time points that match last dimension of data</li>
+<li><strong>est_key</strong> – value
+estimation key for this value</li>
+<li><strong>est_val</strong> – value
+estimation value for this set of data</li>
+<li><strong>roi</strong> – str
+Name of the roi that this comes from</li>
+<li><strong>trial</strong> – ndarray
+Needs to match first dim of data</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">A pandas DataFrame that contains source reconstructed data
+with hierarchical index to describe each data point.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.apply_lcmv">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">apply_lcmv</code><span class="sig-paren">(</span><em>tfrdata</em>, <em>est_key</em>, <em>est_vals</em>, <em>events</em>, <em>times</em>, <em>info</em>, <em>filters</em>, <em>post_func=None</em>, <em>accumulate_func=None</em>, <em>max_ori_out='signed'</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#apply_lcmv"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.apply_lcmv" title="Permalink to this definition">¶</a></dt>
+<dd><p>Apply Linearly Constrained Minimum Variance (LCMV) beamformer weights.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>tfrdata</strong> – ndarray
+Data to be reconstructed.
+Should be either n_trials x n_sensors x Y x n_time
+or trials x sensors x time. Reconstruction treats epochs and
+dim Y as independent dimensions.</li>
+<li><strong>est_key</strong> – value
+A key to identify this reconstruction (e.g. F for power)</li>
+<li><strong>est_vals</strong> – sequence
+Values that identify different reconstructions along dimension Y
+for a single epoch, e.g. the frequency for power reconstructions.
+Needs to be length Y.</li>
+<li><strong>events</strong> – array
+Identifiers for different epochs. Needs to be of length n_trials.</li>
+<li><strong>times</strong> – array
+Time of entries in last dimension of input data.</li>
+<li><strong>info</strong> – mne info structure
+Info structure of the epochs which are to be reconstructed</li>
+<li><strong>filters</strong> – dict
+Contains ROI names as keys and MNE filter dicts as values.</li>
+<li><strong>post_func</strong> – function
+This function is applied to the reconstructed epochs, useful
+to convert complex TFR estimates into power values.</li>
+<li><strong>accumulate_func</strong> – function
+Function that is applied after post_func has been applied.
+Can for example be used to transform the output into a dataframe.</li>
+<li><strong>max_ori_out</strong> – str, default ‘signed’
+This is passed to the MNE LCMV function which at the moment
+requires this to be ‘signed’</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">List of source reconstructed epochs transformed by post_func.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.broadband_est">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">broadband_est</code><span class="sig-paren">(</span><em>x, time, est_val=[-1], est_key='BB', **kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#broadband_est"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.broadband_est" title="Permalink to this definition">¶</a></dt>
+<dd><p>Estimate broadband from source reconstructed time course</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.complex_tfr">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">complex_tfr</code><span class="sig-paren">(</span><em>x</em>, <em>time</em>, <em>est_val=None</em>, <em>est_key=None</em>, <em>sf=600.0</em>, <em>foi=None</em>, <em>cycles=None</em>, <em>time_bandwidth=None</em>, <em>n_jobs=1</em>, <em>decim=10</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#complex_tfr"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.complex_tfr" title="Permalink to this definition">¶</a></dt>
+<dd><p>Estimate power of epochs in array x.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.flip_and_avg_vertices">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">flip_and_avg_vertices</code><span class="sig-paren">(</span><em>data</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#flip_and_avg_vertices"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.flip_and_avg_vertices" title="Permalink to this definition">¶</a></dt>
+<dd><p>Correct random sign flips in reconstructed vertices.</p>
+<p>Average over vertices but correct for random flips first
+Correction is done by ensuring positive correlations
+between vertices</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>data</strong> – ndarray
+A 2D array with vertices in the first dimension and time
+in the second.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">A single time series constructed by averaging over vertices.</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.get_filter">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">get_filter</code><span class="sig-paren">(</span><em>info</em>, <em>forward</em>, <em>data_cov</em>, <em>noise_cov</em>, <em>label=None</em>, <em>reg=0.05</em>, <em>pick_ori='max-power'</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#get_filter"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.get_filter" title="Permalink to this definition">¶</a></dt>
+<dd><p>Comput LCMV filter for one region of interest.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.get_filters">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">get_filters</code><span class="sig-paren">(</span><em>estimator</em>, <em>epochs</em>, <em>forward</em>, <em>source</em>, <em>noise_cov</em>, <em>data_cov</em>, <em>labels</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#get_filters"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.get_filters" title="Permalink to this definition">¶</a></dt>
+<dd><p>Compute LCMV filters for a list of regions of interest.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.par_reconstruct">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">par_reconstruct</code><span class="sig-paren">(</span><em>pre_estimator</em>, <em>pre_est_args</em>, <em>epochs</em>, <em>events</em>, <em>times</em>, <em>info</em>, <em>filters</em>, <em>post_func=&lt;function tfr2power_estimator&gt;</em>, <em>accumulate_func=&lt;function accumulate&gt;</em>, <em>njobs=4</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#par_reconstruct"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.par_reconstruct" title="Permalink to this definition">¶</a></dt>
+<dd><p>Source reconstruct epochs with flexible transform before and after.</p>
+<p>This function performs source reconstruction and can transform the
+input data before reconstruction (e.g. for TFR) and after
+reconstruction (e.g. to compute power from complex FFT output). Output data
+can be  passed through yet another function to shape into the desired
+output.</p>
+<p>The flow of data through this function therefore is:</p>
+<blockquote>
+<div><dl class="docutils">
+<dt>epochs -&gt; pre_estimator -&gt; to source space -&gt;</dt>
+<dd>post_func -&gt; accumulate_func</dd>
+</dl>
+</div></blockquote>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>pre_estimator</strong> – function
+A function that is applied to the sensor space data
+before  source reconstruction. Use ‘complex_tfr’ to project
+the  sensor space TFR representation into source space.</li>
+<li><strong>pre_est_args</strong> – dict
+A dict that is <a href="#id1"><span class="problematic" id="id2">**</span></a>pased to pre_estimator, e.g. additional arguments
+to customize behavior of this function.</li>
+<li><strong>epochs</strong> – ndarray
+Data array of MNE epochs object</li>
+<li><strong>events</strong> – ndarray
+Vector that assigns unique identifiers to different epochs
+in data array.</li>
+<li><strong>times</strong> – ndarray
+Vector that assigns time points to time dimension in data
+array</li>
+<li><strong>info</strong> – MNE info object</li>
+<li><strong>filters</strong> – Dictionary returned by setup_filters</li>
+<li><strong>post_func</strong> – function
+A function that is applied to the source reconstructed data.
+To get TFR in source space you can pass ‘complex_tfr’ as
+‘estimator’ and then use ‘tfr2power_estimator’ here to
+compute power from complex FFT output.</li>
+<li><strong>accumulate_func</strong> – function
+A function that takes the output of post func, the estimation keys,
+estimation values, time points, the region of interest and trial
+identifiers as inputs and returns a pandas DataFrame.</li>
+<li><strong>njobs</strong> – int
+Number of cores to parallelize over.</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">List that contains output for each ROI.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.reconstruct_broadband">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">reconstruct_broadband</code><span class="sig-paren">(</span><em>filters</em>, <em>info</em>, <em>epochs</em>, <em>events</em>, <em>times</em>, <em>estimator=&lt;function broadband_est&gt;</em>, <em>est_args={}</em>, <em>post_func=None</em>, <em>accumulate_func=&lt;function accumulate&gt;</em>, <em>njobs=4</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#reconstruct_broadband"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.reconstruct_broadband" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reconstruct broadband activity from a set of regions of interest.</p>
+<p>Parallelization is applied across filters, i.e. regions of interest. This
+function calls par_reconstruct with appropriate default settings for
+broadband reconstruction.</p>
+<p>See reconstruct_tfr for description of arguments</p>
+</dd></dl>
+
+<dl class="function">
+<dt>
+<code class="descname">reconstruct_tfr(filters, info, epochs, events, times, estimator=&lt;function complex_tfr&gt;, est_args={'cycles': array([  1. ,   1.5,   2. ,   2.5,   3. ,   3.5,   4. ,   4.5,   5. ,</code></dt>
+<dt>
+<code class="descname">5.5,   6. ,   6.5,   7. ,   7.5,   8. ,   8.5,   9. ,   9.5,</code></dt>
+<dt>
+<code class="descname">10. ,  10.5,  11. ,  11.5,  12. ,  12.5,  13. ,  13.5,  14. ,  14.5]), 'est_key': 'F', 'est_val': array([ 10,  15,  20,  25,  30,  35,  40,  45,  50,  55,  60,  65,  70,</code></dt>
+<dt>
+<code class="descname">75,  80,  85,  90,  95, 100, 105, 110, 115, 120, 125, 130, 135,</code></dt>
+<dt>
+<code class="descname">140, 145]), 'foi': array([ 10,  15,  20,  25,  30,  35,  40,  45,  50,  55,  60,  65,  70,</code></dt>
+<dt>
+<code class="descname">75,  80,  85,  90,  95, 100, 105, 110, 115, 120, 125, 130, 135,</code></dt>
+<dt>
+<code class="descname">140, 145]), 'n_jobs': 1, 'time_bandwidth': 2}, post_func=&lt;function tfr2power_estimator&gt;, accumulate_func=&lt;function accumulate&gt;, njobs=4)</code></dt>
+<dd><p>Reconstruct time frequency representation of epochs.</p>
+<p>Parallelization is applied across filters, i.e. regions of interest. This
+function calls par_reconstruct with appropriate default settings for TFR
+reconstruction. Change the est_args argument to specify parameters
+for the time frequency conversion.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>filters</strong> – Dictionary returned by setup_filters</li>
+<li><strong>info</strong> – MNE info object</li>
+<li><strong>epochs</strong> – ndarray
+Data array of MNE epochs object</li>
+<li><strong>events</strong> – ndarray
+Vector that assigns unique identifiers to different epochs
+in data array.</li>
+<li><strong>times</strong> – ndarray
+Vector that assigns time points to time dimension in data
+array</li>
+<li><strong>estimator</strong> – function
+A function that is applied to the sensor space data
+before  source reconstruction. Use ‘complex_tfr’ to project
+the  sensor space TFR representation into source space.</li>
+<li><strong>est_args</strong> – dict
+A dict that is <a href="#id3"><span class="problematic" id="id4">**</span></a>pased to estimator, e.g. parameters for the
+TFR transformation.</li>
+<li><strong>post_func</strong> – function
+A function that is applied to the source reconstructed data.
+To get TFR in source space you can pass ‘complex_tfr’ as
+‘estimator’ and then use ‘tfr2power_estimator’ here to
+compute power from complex FFT output.</li>
+<li><strong>accumulate_func</strong> – function
+A function that takes the output of post func, the estimation keys,
+estimation values, time points, the region of interest and trial
+identifiers as inputs and returns a pandas DataFrame.</li>
+<li><strong>njobs</strong> – int
+Number of cores to parallelize over.</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">Concatenated outputs across regions of interest.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="pymeg.lcmv.tfr2power_estimator">
+<code class="descclassname">pymeg.lcmv.</code><code class="descname">tfr2power_estimator</code><span class="sig-paren">(</span><em>x</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/pymeg/lcmv.html#tfr2power_estimator"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#pymeg.lcmv.tfr2power_estimator" title="Permalink to this definition">¶</a></dt>
+<dd><p>Compute power on source reconstructed FFT results</p>
+</dd></dl>
+
+</div>
+</div>
+<div class="section" id="indices-and-tables">
+<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Permalink to this headline">¶</a></h1>
+<ul class="simple">
+<li><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></li>
+<li><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></li>
+<li><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></li>
+</ul>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="#">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Source reconstruction with pymeg</a></li>
+<li><a class="reference internal" href="#preparing-a-subject-for-source-reconstruction">Preparing a subject for source reconstruction</a><ul>
+<li><a class="reference internal" href="#preprocess-meg-data">Preprocess MEG data</a></li>
+<li><a class="reference internal" href="#surface-generation-recon-all">Surface generation / recon-all</a></li>
+<li><a class="reference internal" href="#aligning-the-hcpmmp-atlas-to-your-subject">Aligning the HCPMMP atlas to your subject</a></li>
+<li><a class="reference internal" href="#aligning-the-wang-et-al-2015-atlas">Aligning the Wang et al. 2015 atlas</a></li>
+<li><a class="reference internal" href="#creating-a-high-density-head-shape-model">Creating a high density head shape model</a></li>
+<li><a class="reference internal" href="#creating-bem-surfaces-with-fieldtrip">Creating BEM surfaces with fieldtrip</a></li>
+<li><a class="reference internal" href="#creating-a-mri-meg-transformation-matrix">Creating a MRI&lt;&gt;MEG transformation matrix</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#indices-and-tables">Indices and tables</a></li>
+</ul>
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="#">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/index.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2018, Niklas Wilming, Jan-Willen de Gee, Keno Hagena, Anke Braun.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.7.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.10</a>
+      
+      |
+      <a href="_sources/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
