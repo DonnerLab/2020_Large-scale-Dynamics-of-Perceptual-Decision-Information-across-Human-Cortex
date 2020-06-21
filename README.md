@@ -13,7 +13,16 @@ Often requires intermediate results to be generated via a mixture of other funct
 5) Preprocessing of raw data: preprocessing.py
 
 
-Intermediate outputs and or MEG raw / source reconstructed data can be obtained via individual request.
+Intermediate outputs and or MEG raw / source reconstructed data can be obtained via individual request (for now). Data will be made publicly available upon publication.
 
+The scripts were tested on linux using python 3.6 and 3.7. 
 The analysis used MNE version 0.17.1.
 See environments.txt for a list of installed packages.
+
+Install
+
+In this folder:
+python setup.py install
+
+In pymeg folder:
+python setup.py install
